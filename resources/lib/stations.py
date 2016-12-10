@@ -11,3 +11,8 @@ def get_radio_station():
     url = "http://rai.it/dl/portaleRadio/popup/ContentSet-003728e4-db46-4df8-83ff-606426c0b3f5-json.html"
     response = json.load(urllib2.urlopen(url))
     return response["dati"]
+
+def get_rai_replay():
+    response = urllib2.urlopen("http://www.raiplay.it/dl/RaiTV/RaiPlayMobile/Prod/Config/programmiAZ-elenco.json")
+    data = json.JSONDecoder().decode(response.read())
+    return data

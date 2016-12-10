@@ -8,6 +8,7 @@ import xbmcaddon
 import urllib
 import urlparse
 import datetime
+import json
 import StorageServer
 from resources.lib.tgr import TGR
 from resources.lib.search import Search
@@ -16,6 +17,7 @@ from resources.lib.replay import Replay
 from resources.lib.ondemand import OnDemand
 from resources.lib.relinker import Relinker
 from resources.lib.podcast import Podcast
+from resources.lib.raireplay import RaiReplay
 import resources.lib.stations as stations
 import resources.lib.utils as utils
 
@@ -32,6 +34,7 @@ handle = int(sys.argv[1])
 cache = StorageServer.StorageServer("plugin.video.raitv", 0) # (Your plugin name, Cache time in hours)
 tv_stations = cache.cacheFunction(stations.get_tv_stations)
 radio_stations = cache.cacheFunction(stations.get_radio_station)
+rai_replay = cache.cacheFunction(stations.get_rai_replay)
 
 # utility functions
 def parameters_string_to_dict(parameters):
@@ -69,6 +72,8 @@ def show_root_menu():
     addDirectoryItem({"mode": "themes"}, liStyle)
     liStyle = xbmcgui.ListItem("Da non perdere")
     addDirectoryItem({"mode": "must_watch_list"}, liStyle)
+    liStyle = xbmcgui.ListItem("RaiReplay")
+    addDirectoryItem({"mode": "raireplay",'submode':'main'}, liStyle)
     liStyle = xbmcgui.ListItem("Cerca...")
     addDirectoryItem({"mode": "search"}, liStyle)
     xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
@@ -516,6 +521,82 @@ def show_search_result(items):
     xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_NONE)
     xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
     
+def show_raireplay():
+    special_item = xbmcgui.ListItem('Cerca')
+    addDirectoryItem({'mode': 'raireplay','submode':'search'},special_item)
+    for k in sorted(rai_replay.keys()):
+            alphabet_element = xbmcgui.ListItem(k)
+            addDirectoryItem({'mode':'raireplay','submode': 'explore_letter_content','index': k},alphabet_element)
+    xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_NONE)
+    xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
+
+def exploreLetterContents(index):
+    programs = rai_replay[index]
+    cache.set('raireplay_programs',json.JSONEncoder().encode(programs))
+    for i in range(len(programs)):
+        liStyle = xbmcgui.ListItem(programs[i]['name'])
+        addDirectoryItem({'mode':'raireplay','submode': 'explore_program','index':i},liStyle)
+    xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
+
+def exploreProgram(mode,index):
+    if mode:
+        programs = json.JSONDecoder().decode(cache.get('raireplay_found'))
+    else:
+        programs = json.JSONDecoder().decode(cache.get('raireplay_programs'))
+    rai_replay = RaiReplay()
+    data=rai_replay.getProgramContent(programs,index)
+    cache.set('raireplay_program',json.JSONEncoder().encode(data['Blocks']))
+    for i in range(len(data['Blocks'])):
+        liStyle = xbmcgui.ListItem(data['Blocks'][i]['Name'])
+        addDirectoryItem({'mode':'raireplay','submode': 'explore_program_subcontent','index':i},liStyle)
+    xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_LABEL)
+    xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
+    
+def exploreProgramSubContent(index):
+    program_content = json.JSONDecoder().decode(cache.get('raireplay_program'))
+    detail = program_content[index]['Sets']
+    cache.set('raireplay_detail',json.JSONEncoder().encode(detail))
+    if len(detail) == 1:
+        viewProgramMedia(0)
+    else:
+        for i in range(len(detail)):
+            liStyle = xbmcgui.ListItem(detail[i]['Name'])
+            addDirectoryItem({'mode':'raireplay','submode':'media','index':i},liStyle)
+        xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_LABEL)
+        xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
+        
+def viewProgramMedia(index):
+    detail_content = json.JSONDecoder().decode(cache.get('raireplay_detail'))
+    rai_replay = RaiReplay()
+    data=rai_replay.getMediaContent(detail_content,index)
+    for k,val in data.items():
+        liStyle = xbmcgui.ListItem(val['title'])
+        liStyle.setInfo(val['type'],val['infoLabels'])
+        liStyle.setProperty('IsPlayable', 'true')
+        addLinkItem({'mode':'play','url':val['contentUrl']},liStyle)
+    xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_LABEL)
+    xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
+    
+def raireplay_search():
+    keyboard = xbmc.Keyboard()
+    keyboard.doModal()
+    keyboard.setHeading('Cerca')
+    if keyboard.isConfirmed():
+        list_values = []
+        searched_text = keyboard.getText().lower()
+        xbmc.log('looking for '+searched_text)
+        for val in rai_replay.values():
+            for i in range(len(val)):
+                if searched_text in val[i]['name'].lower():
+                    list_values.append(val[i])
+        cache.set('raireplay_found',json.JSONEncoder().encode(list_values))
+        #xbmc.log ("list_values="+json.JSONEncoder().encode(list_values))
+        for i in range(len(list_values)):
+            liStyle = xbmcgui.ListItem(list_values[i]['name'])
+            addDirectoryItem({'mode':'raireplay','submode': 'explore_found','index':i},liStyle)
+        xbmcplugin.addSortMethod(handle, xbmcplugin.SORT_METHOD_LABEL)
+        xbmcplugin.endOfDirectory(handle=handle, succeeded=True)
+        
 def log_country():
     ondemand = OnDemand()
     country = ondemand.getCountry()
@@ -537,6 +618,8 @@ uniquename = str(params.get("uniquename", ""))
 pathId = str(params.get("path_id", ""))
 mediatype = str(params.get("mediatype", ""))
 tags = str(params.get("tags", ""))
+submode = str(params.get('submode'))
+index = str(params.get('index'))
 
 if mode == "live_tv":
     show_tv_channels()
@@ -609,6 +692,22 @@ elif mode == "search":
 
 elif mode == "play":
     play(url, uniquename, pathId)
+    
+elif mode == 'raireplay':
+    if submode  == 'explore_letter_content':
+        exploreLetterContents(index)
+    elif submode == 'explore_program':
+        exploreProgram(0,int(index))
+    elif submode == 'explore_found':
+        exploreProgram(1,int(index))
+    elif submode == 'explore_program_subcontent':
+        exploreProgramSubContent(int(index))
+    elif submode == 'media':
+        viewProgramMedia(int(index))
+    elif submode=='search':
+        raireplay_search()
+    else:
+        show_raireplay()
 
 else:
     log_country()
